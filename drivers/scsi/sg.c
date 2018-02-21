@@ -912,8 +912,10 @@ sg_ioctl(struct file *filp, unsigned int cmd_in, unsigned long arg)
 			return -ENXIO;
 		if (!access_ok(VERIFY_WRITE, p, SZ_SG_IO_HDR))
 			return -EFAULT;
+		mutex_lock(&sfp->parentdp->open_rel_lock);
 		result = sg_new_write(sfp, filp, p, SZ_SG_IO_HDR,
 				 1, read_only, 1, &srp);
+		mutex_unlock(&sfp->parentdp->open_rel_lock);
 		if (result < 0)
 			return result;
 		result = wait_event_interruptible(sfp->read_wait,
@@ -1071,7 +1073,7 @@ sg_ioctl(struct file *filp, unsigned int cmd_in, unsigned long arg)
 			sg_req_info_t *rinfo;
 
 			rinfo = kzalloc(SZ_SG_REQ_INFO * SG_MAX_QUEUE,
-					GFP_KERNEL);
+								GFP_KERNEL);
 			if (!rinfo)
 				return -ENOMEM;
 			read_lock_irqsave(&sfp->rq_list_lock, iflags);
@@ -2135,15 +2137,15 @@ sg_add_request(Sg_fd * sfp)
 		if (!sfp->cmd_q)
 			goto out_unlock;
 
-		for (k = 0; k < SG_MAX_QUEUE; ++k, ++rp) {
-			if (!rp->parentfp)
-				break;
-		}
+			for (k = 0; k < SG_MAX_QUEUE; ++k, ++rp) {
+				if (!rp->parentfp)
+					break;
+			}
 		if (k >= SG_MAX_QUEUE)
 			goto out_unlock;
 	}
-	memset(rp, 0, sizeof (Sg_request));
-	rp->parentfp = sfp;
+				memset(rp, 0, sizeof (Sg_request));
+				rp->parentfp = sfp;
 	rp->header.duration = jiffies_to_msecs(jiffies);
 	list_add_tail(&rp->entry, &sfp->rq_list);
 	write_unlock_irqrestore(&sfp->rq_list_lock, iflags);
