@@ -356,7 +356,7 @@ include $(srctree)/scripts/Kbuild.include
 # Make variables (CC, etc...)
 AS		= $(CROSS_COMPILE)as
 LD		= $(CROSS_COMPILE)ld
-REAL_CC		= $(CROSS_COMPILE)gcc
+CC		= $(CROSS_COMPILE)gcc
 CPP		= $(CC) -E
 AR		= $(CROSS_COMPILE)ar
 NM		= $(CROSS_COMPILE)nm
@@ -371,10 +371,6 @@ PERL		= perl
 PYTHON		= python
 CHECK		= sparse
 
-# Use the wrapper for the compiler.  This wrapper scans for new
-# warnings and causes the build to stop upon encountering them.
-CC		= $(srctree)/scripts/gcc-wrapper.py $(REAL_CC)
-
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 		  -Wbitwise -Wno-return-void $(CF)
 CFLAGS_MODULE   =
@@ -382,18 +378,20 @@ AFLAGS_MODULE   =
 LDFLAGS_MODULE  =
 CFLAGS_KERNEL	=
 AFLAGS_KERNEL	=
-CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage -fno-tree-loop-im
+CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
 
 # fall back to -march=armv8-a in case the compiler isn't compatible 
 # with -mcpu and -mtune
-ARM_ARCH_OPT := -mcpu=cortex-a57+crc+crypto -mtune=cortex-a57
+ARM_ARCH_OPT := -mcpu=cortex-a57 -mtune=cortex-a57
 GEN_OPT_FLAGS := $(call cc-option,$(ARM_ARCH_OPT),-march=armv8-a) \
  -g0 \
  -DNDEBUG \
  -fomit-frame-pointer \
- -fmodulo-sched \
  -fmodulo-sched-allow-regmoves \
  -fivopts
+
+# flags to fix module loading issues if incompatible general optimizations are used
+MOD_FIX_FLAGS := -fno-tree-loop-vectorize
 
 # Use USERINCLUDE when you must reference the UAPI directories only.
 USERINCLUDE    := \
@@ -424,7 +422,7 @@ KBUILD_AFLAGS_KERNEL := $(GEN_OPT_FLAGS)
 KBUILD_CFLAGS_KERNEL := $(GEN_OPT_FLAGS)
 KBUILD_AFLAGS   := -D__ASSEMBLY__
 KBUILD_AFLAGS_MODULE  := -DMODULE $(GEN_OPT_FLAGS)
-KBUILD_CFLAGS_MODULE  := -DMODULE $(GEN_OPT_FLAGS)
+KBUILD_CFLAGS_MODULE  := -DMODULE $(MOD_FIX_FLAGS) $(GEN_OPT_FLAGS)
 KBUILD_LDFLAGS_MODULE := -T $(srctree)/scripts/module-common.lds
 
 # Snapdragon 820 doesn't need 835769/843419 erratum fixes
@@ -637,16 +635,57 @@ all: vmlinux
 include $(srctree)/arch/$(SRCARCH)/Makefile
 
 KBUILD_CFLAGS	+= $(call cc-option,-fno-delete-null-pointer-checks,)
-KBUILD_CFLAGS	+= $(call cc-disable-warning,maybe-uninitialized,)
-KBUILD_CFLAGS	+= $(call cc-disable-warning,frame-address,)
-KBUILD_CFLAGS	+= $(call cc-disable-warning, format-truncation)
-KBUILD_CFLAGS	+= $(call cc-disable-warning, format-overflow)
-KBUILD_CFLAGS	+= $(call cc-disable-warning, int-in-bool-context)
 KBUILD_CFLAGS	+= $(call cc-option,-fno-PIE)
 KBUILD_AFLAGS	+= $(call cc-option,-fno-PIE)
 
+# supressing some warnings for gcc
+# get gcc version as 3-digit number
+empty:=
+space:= $(empty) $(empty)
+GCCVERSIONSTRING := $(shell expr `$(CC) -dumpversion`)
+#Create version number without "."
+GCCVERSION := $(shell expr `echo $(GCCVERSIONSTRING)` | cut -f1 -d.)
+GCCVERSION += $(shell expr `echo $(GCCVERSIONSTRING)` | cut -f2 -d.)
+GCCVERSION += $(shell expr `echo $(GCCVERSIONSTRING)` | cut -f3 -d.)
+# Make sure the version number has at least 3 decimals
+GCCVERSION += 00
+# Remove spaces from the version number
+GCCVERSION := $(subst $(space),$(empty),$(GCCVERSION))
+# Crop the version number to 3 decimals.
+GCCVERSION := $(shell expr `echo $(GCCVERSION)` | cut -b1-3)
+
+# disable these warnings for all
+KBUILD_CFLAGS	+= $(call cc-disable-warning, frame-address,)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, format-overflow)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, format-truncation)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, int-in-bool-context)
+# Fixes for GCC 5+
+ifeq ($(shell test $(GCCVERSION) -ge 500; echo $$?),0)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, logical-not-parentheses,)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, maybe-uninitialized,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, misleading-indentation,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, parentheses,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, tautological-compare,)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, unused-const-variable,)
+endif
+# Fixes for GCC 7+
+ifeq ($(shell test $(GCCVERSION) -ge 700; echo $$?),0)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-array-bounds,)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-bool-compare,)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-bool-operation,)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-discarded-array-qualifiers,)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-duplicate-decl-specifier,)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-incompatible-pointer-types,)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-memset-elt-size,)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-memset-transposed-args,)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-stringop-overflow ,)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-switch-bool,)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-switch-unreachable,)
+KBUILD_CFLAGS   += $(call cc-option,-fno-store-merging,)
+endif
+
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
-KBUILD_CFLAGS	+= -Os
+KBUILD_CFLAGS	+= -Os $(call cc-disable-warning,maybe-uninitialized,)
 else
 KBUILD_CFLAGS	+= -O2
 endif
@@ -720,10 +759,9 @@ KBUILD_CFLAGS += $(call cc-option, -mno-global-merge,)
 KBUILD_CFLAGS += $(call cc-option, -fcatch-undefined-behavior)
 else
 
-# These warnings generated too much noise in a regular build.
-# Use make W=1 to enable them (see scripts/Makefile.build)
+# This warning generated too much noise in a regular build.
+# Use make W=1 to enable this warning (see scripts/Makefile.build)
 KBUILD_CFLAGS += $(call cc-disable-warning, unused-but-set-variable)
-KBUILD_CFLAGS += $(call cc-disable-warning, unused-const-variable)
 endif
 
 ifdef CONFIG_FRAME_POINTER

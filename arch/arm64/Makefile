@@ -17,24 +17,17 @@ GZFLAGS		:=-9
 
 KBUILD_DEFCONFIG := defconfig
 
-ARM_ARCH_OPT := -mcpu=cortex-a57+crc+crypto -mtune=cortex-a57
-GEN_OPT_FLAGS := $(call cc-option,$(ARM_ARCH_OPT),-march=armv8-a) \
+ARM_ARCH_OPT := -mcpu=cortex-a57 -mtune=cortex-a57
+GEN_OPT_FLAGS := $(call cc-option,$(ARM_ARCH_OPT),-march=armv8-a,-mpc-relative-literal-loads) \
  -g0 \
  -DNDEBUG \
  -fomit-frame-pointer \
- -fmodulo-sched \
  -fmodulo-sched-allow-regmoves \
  -fivopts
 
 KBUILD_CFLAGS	+= -mgeneral-regs-only
-KBUILD_CFLAGS	+= -fno-asynchronous-unwind-tables
 KBUILD_CFLAGS	+= -fno-pic
-
-ifeq ($(cc-name),clang)
-KBUILD_CFLAGS	+= -DCONFIG_ARCH_SUPPORTS_INT128
-else
-KBUILD_CFLAGS	+= $(call cc-ifversion, -ge, 0500, -DCONFIG_ARCH_SUPPORTS_INT128)
-endif
+KBUILD_CFLAGS	+= $(call cc-option, -mpc-relative-literal-loads)
 
 KBUILD_CFLAGS	+= $(call cc-option,-mabi=lp64)
 KBUILD_AFLAGS	+= $(call cc-option,-mabi=lp64)
@@ -55,7 +48,6 @@ CHECKFLAGS	+= -D__aarch64__
 
 ifeq ($(CONFIG_ARM64_ERRATUM_843419), y)
 KBUILD_CFLAGS_MODULE	+= -mcmodel=large
-KBUILD_CFLAGS		+= $(call cc-option, -mpc-relative-literal-loads)
 endif
 
 # Default value
