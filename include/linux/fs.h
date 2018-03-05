@@ -387,6 +387,8 @@ struct address_space_operations {
 	 */
 	int (*migratepage) (struct address_space *,
 			struct page *, struct page *, enum migrate_mode);
+	bool (*isolate_page)(struct page *, isolate_mode_t);
+	void (*putback_page)(struct page *);
 	int (*launder_page) (struct page *);
 	int (*is_partially_uptodate) (struct page *, unsigned long,
 					unsigned long);
@@ -2305,6 +2307,9 @@ extern int filemap_fdatawrite_range(struct address_space *mapping,
 extern int vfs_fsync_range(struct file *file, loff_t start, loff_t end,
 			   int datasync);
 extern int vfs_fsync(struct file *file, int datasync);
+#ifdef CONFIG_MACH_LGE
+extern int check_and_sync(void);
+#endif
 static inline int generic_write_sync(struct file *file, loff_t pos, loff_t count)
 {
 	if (!(file->f_flags & O_DSYNC) && !IS_SYNC(file->f_mapping->host))
