@@ -299,8 +299,8 @@ GRAPHITE = -fgraphite -fgraphite-identity -floop-interchange -ftree-loop-distrib
 
 HOSTCC       = gcc
 HOSTCXX      = g++
-HOSTCFLAGS   = -Wall -Wmissing-prototypes -Wstrict-prototypes -Ofast -fno-inline-functions -fno-ipa-cp-clone -fomit-frame-pointer -std=gnu89 $(GRAPHITE)
-HOSTCXXFLAGS = -Ofast -fno-inline-functions -fno-ipa-cp-clone $(GRAPHITE)
+HOSTCFLAGS   = -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 $(GRAPHITE)
+HOSTCXXFLAGS = -O2 $(GRAPHITE)
 
 ifeq ($(shell $(HOSTCC) -v 2>&1 | grep -c "clang version"), 1)
 HOSTCFLAGS  += -Wno-unused-value -Wno-unused-parameter \
@@ -412,15 +412,11 @@ LINUXINCLUDE    := \
 
 KBUILD_CPPFLAGS := -D__KERNEL__
 
-KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs -Wno-misleading-indentation \
-		   -fno-strict-aliasing -fno-common -Wno-incompatible-pointer-types \
-		   -Werror-implicit-function-declaration -Wno-unused-const-variable \
-		   -Wno-array-bounds -Wno-maybe-uninitialized \
-		   -Wno-format-security -Wno-discarded-array-qualifiers -Wno-memset-transposed-args \
-		   -Wno-bool-compare -Wno-logical-not-parentheses -Wno-switch-bool -Wno-tautological-compare \
-		   -std=gnu89 -std=gnu89 -Wno-format-truncation -Wno-bool-operation -Wno-duplicate-decl-specifier \
-		   -Wno-memset-elt-size -Wno-parentheses -Wno-format-overflow -Wno-int-in-bool-context \
-		   -Wno-switch-unreachable -Wno-stringop-overflow \
+KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
+		   -fno-strict-aliasing -fno-common \
+		   -Werror-implicit-function-declaration \
+		   -Wno-format-security \
+		   -std=gnu89 \
 		   $(GEN_OPT_FLAGS)
 KBUILD_AFLAGS_KERNEL := $(GEN_OPT_FLAGS)
 KBUILD_CFLAGS_KERNEL := $(GEN_OPT_FLAGS)
@@ -428,6 +424,17 @@ KBUILD_AFLAGS   := -D__ASSEMBLY__
 KBUILD_AFLAGS_MODULE  := -DMODULE $(GEN_OPT_FLAGS)
 KBUILD_CFLAGS_MODULE  := -DMODULE $(MOD_FIX_FLAGS) $(GEN_OPT_FLAGS)
 KBUILD_LDFLAGS_MODULE := -T $(srctree)/scripts/module-common.lds
+
+# Snapdragon 820 doesn't need 835769/843419 erratum fixes
+# some toolchain enables those fixes automatically, so opt-out
+KBUILD_CFLAGS	+= $(call cc-option, -mno-fix-cortex-a53-835769)
+KBUILD_CFLAGS	+= $(call cc-option, -mno-fix-cortex-a53-843419)
+LDFLAGS_vmlinux	+= $(call ld-option, --no-fix-cortex-a53-835769)
+LDFLAGS_vmlinux	+= $(call ld-option, --no-fix-cortex-a53-843419)
+LDFLAGS_MODULE	+= $(call ld-option, --no-fix-cortex-a53-835769)
+LDFLAGS_MODULE	+= $(call ld-option, --no-fix-cortex-a53-843419)
+LDFLAGS		+= $(call ld-option, --no-fix-cortex-a53-835769)
+LDFLAGS		+= $(call ld-option, --no-fix-cortex-a53-843419)
 
 # Read KERNELRELEASE from include/config/kernel.release (if it exists)
 KERNELRELEASE = $(shell cat include/config/kernel.release 2> /dev/null)
@@ -628,30 +635,63 @@ all: vmlinux
 include $(srctree)/arch/$(SRCARCH)/Makefile
 
 KBUILD_CFLAGS	+= $(call cc-option,-fno-delete-null-pointer-checks,)
-KBUILD_CFLAGS	+= $(call cc-disable-warning,frame-address,)
-KBUILD_CFLAGS	+= $(call cc-disable-warning, format-truncation)
-#KBUILD_CFLAGS	+= $(call cc-disable-warning, format-overflow)
-#KBUILD_CFLAGS	+= $(call cc-disable-warning, int-in-bool-context)
 KBUILD_CFLAGS	+= $(call cc-option,-fno-PIE)
 KBUILD_AFLAGS	+= $(call cc-option,-fno-PIE)
 
-# Disable maybe-uninitialized warnings
-KBUILD_CFLAGS	+= $(call cc-disable-warning,maybe-uninitialized,)
-KBUILD_CFLAGS	+= $(call cc-disable-warning,unused-const-variable,)
+# supressing some warnings for gcc
+# get gcc version as 3-digit number
+empty:=
+space:= $(empty) $(empty)
+GCCVERSIONSTRING := $(shell expr `$(CC) -dumpversion`)
+#Create version number without "."
+GCCVERSION := $(shell expr `echo $(GCCVERSIONSTRING)` | cut -f1 -d.)
+GCCVERSION += $(shell expr `echo $(GCCVERSIONSTRING)` | cut -f2 -d.)
+GCCVERSION += $(shell expr `echo $(GCCVERSIONSTRING)` | cut -f3 -d.)
+# Make sure the version number has at least 3 decimals
+GCCVERSION += 00
+# Remove spaces from the version number
+GCCVERSION := $(subst $(space),$(empty),$(GCCVERSION))
+# Crop the version number to 3 decimals.
+GCCVERSION := $(shell expr `echo $(GCCVERSION)` | cut -b1-3)
 
-# Needed to unbreak GCC 7.x and above
+# disable these warnings for all
+KBUILD_CFLAGS	+= $(call cc-disable-warning, frame-address,)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, format-overflow)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, format-truncation)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, int-in-bool-context)
+# Fixes for GCC 5+
+ifeq ($(shell test $(GCCVERSION) -ge 500; echo $$?),0)
+KBUILD_CFLAGS   += $(call cc-disable-warning, incompatible-pointer-types,)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, logical-not-parentheses,)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, maybe-uninitialized,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, misleading-indentation,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, parentheses,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, tautological-compare,)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, unused-const-variable,)
+endif
+# Fixes for GCC 7+
+ifeq ($(shell test $(GCCVERSION) -ge 700; echo $$?),0)
+KBUILD_CFLAGS   += $(call cc-disable-warning, array-bounds,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, bool-compare,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, bool-operation,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, discarded-array-qualifiers,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, duplicate-decl-specifier,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, memset-elt-size,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, memset-transposed-args,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, stringop-overflow ,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, switch-bool,)
+KBUILD_CFLAGS   += $(call cc-disable-warning, switch-unreachable,)
 KBUILD_CFLAGS   += $(call cc-option,-fno-store-merging,)
+endif
+
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
 KBUILD_CFLAGS	+= -Os
 else
-KBUILD_CFLAGS	+= -Ofast -fno-inline-functions -fno-ipa-cp-clone -fno-store-merging
+KBUILD_CFLAGS	+= -O2
 endif
 
 # Tell gcc to never replace conditional load with a non-conditional one
 KBUILD_CFLAGS	+= $(call cc-option,--param=allow-store-data-races=0)
-
-# Needed to unbreak GCC 7.x and above
-KBUILD_CFLAGS   += $(call cc-option,-fno-store-merging,)
 
 ifdef CONFIG_READABLE_ASM
 # Disable optimizations that make assembler listings hard to read.
@@ -829,9 +869,6 @@ LDFLAGS_vmlinux += $(LDFLAGS_BUILD_ID)
 ifeq ($(CONFIG_STRIP_ASM_SYMS),y)
 LDFLAGS_vmlinux	+= $(call ld-option, -X,)
 endif
-
-LDFLAGS_vmlinux += $(call ld-option, --fix-cortex-a53-843419)
-LDFLAGS_MODULE += $(call ld-option, --fix-cortex-a53-843419)
 
 # Default kernel image to build when no specific target is given.
 # KBUILD_IMAGE may be overruled on the command line or
